@@ -1,3 +1,4 @@
+#include "musl-compat.h"
 /*
  * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
  * Copyright (c) 2012 Canonical Ltd
@@ -833,6 +834,27 @@ static int _hybris_hook_pthread_mutex_lock_timeout_np(pthread_mutex_t *__mutex, 
     return pthread_mutex_timedlock(realmutex, &tv);
 }
 
+#ifdef HYBRIS_TIME32
+/* localtime/gmtime do bionic recebem time_t de 32 bits */
+static struct tm *_hybris_hook_localtime32(const int32_t *t)
+{
+    time_t tt = *t;
+    return localtime(&tt);
+}
+
+static struct tm *_hybris_hook_localtime_r32(const int32_t *t, struct tm *res)
+{
+    time_t tt = *t;
+    return localtime_r(&tt, res);
+}
+
+static struct tm *_hybris_hook_gmtime32(const int32_t *t)
+{
+    time_t tt = *t;
+    return gmtime(&tt);
+}
+#endif
+
 static int _hybris_hook_pthread_mutex_timedlock(pthread_mutex_t *__mutex,
                                       const struct timespec *__abs_timeout)
 {
@@ -855,7 +877,7 @@ static int _hybris_hook_pthread_mutex_timedlock(pthread_mutex_t *__mutex,
         *((uintptr_t *)__mutex) = (uintptr_t) realmutex;
     }
 
-    return pthread_mutex_timedlock(realmutex, __abs_timeout);
+    return pthread_mutex_timedlock(realmutex, HYBRIS_TS(__abs_timeout));
 }
 
 static int _hybris_hook_pthread_mutexattr_setpshared(pthread_mutexattr_t *__attr,
@@ -923,7 +945,9 @@ static int _hybris_hook_pthread_cond_destroy(pthread_cond_t *cond)
          * when it is destroyed and bionic code does not always follow this
          * requirement. To prevent deadlocks reset the reference count of the
          * condition variable. */
+#ifdef __GLIBC__
         realcond->__data.__wrefs = 0;
+#endif
         ret = pthread_cond_destroy(realcond);
         free(realcond);
     }
@@ -1051,7 +1075,7 @@ static int _hybris_hook_pthread_cond_clockwait(pthread_cond_t *cond, pthread_mut
         *((uintptr_t *) mutex) = (uintptr_t) realmutex;
     }
 
-    return pthread_cond_clockwait(realcond, realmutex, clock_id, abstime);
+    return pthread_cond_clockwait(realcond, realmutex, clock_id, HYBRIS_TS(abstime));
 }
 
 static int _hybris_hook_pthread_cond_timedwait(pthread_cond_t *cond,
@@ -1087,7 +1111,7 @@ static int _hybris_hook_pthread_cond_timedwait(pthread_cond_t *cond,
         *((uintptr_t *) mutex) = (uintptr_t) realmutex;
     }
 
-    return pthread_cond_timedwait(realcond, realmutex, abstime);
+    return pthread_cond_timedwait(realcond, realmutex, HYBRIS_TS(abstime));
 }
 
 static int _hybris_hook_pthread_cond_timedwait_relative_np(pthread_cond_t *cond,
@@ -1125,8 +1149,8 @@ static int _hybris_hook_pthread_cond_timedwait_relative_np(pthread_cond_t *cond,
 
     struct timespec tv;
     clock_gettime(CLOCK_REALTIME, &tv);
-    tv.tv_sec += reltime->tv_sec;
-    tv.tv_nsec += reltime->tv_nsec;
+    tv.tv_sec += HYBRIS_TS_SEC(reltime);
+    tv.tv_nsec += HYBRIS_TS_NSEC(reltime);
     if (tv.tv_nsec >= 1000000000) {
       tv.tv_sec++;
       tv.tv_nsec -= 1000000000;
@@ -1330,7 +1354,7 @@ static int _hybris_hook_pthread_rwlock_timedrdlock(pthread_rwlock_t *__rwlock,
 
     pthread_rwlock_t *realrwlock = hybris_set_realrwlock(__rwlock);
 
-    return pthread_rwlock_timedrdlock(realrwlock, abs_timeout);
+    return pthread_rwlock_timedrdlock(realrwlock, HYBRIS_TS(abs_timeout));
 }
 
 static int _hybris_hook_pthread_rwlock_wrlock(pthread_rwlock_t *__rwlock)
@@ -1358,7 +1382,7 @@ static int _hybris_hook_pthread_rwlock_timedwrlock(pthread_rwlock_t *__rwlock,
 
     pthread_rwlock_t *realrwlock = hybris_set_realrwlock(__rwlock);
 
-    return pthread_rwlock_timedwrlock(realrwlock, abs_timeout);
+    return pthread_rwlock_timedwrlock(realrwlock, HYBRIS_TS(abs_timeout));
 }
 
 static int _hybris_hook_pthread_rwlock_unlock(pthread_rwlock_t *__rwlock)
@@ -1587,7 +1611,7 @@ static int _hybris_hook_fgetpos(FILE *fp, bionic_fpos_t *pos)
     fpos_t my_fpos;
     int ret = fgetpos(_get_actual_fp(fp), &my_fpos);
 
-    *pos = my_fpos.__pos;
+    *pos = HYBRIS_FPOS_GET(my_fpos);
 
     return ret;
 }
@@ -1599,7 +1623,7 @@ static int _hybris_hook_fgetpos64(FILE *fp, bionic_fpos64_t *pos)
     fpos64_t my_fpos;
     int ret = fgetpos64(_get_actual_fp(fp), &my_fpos);
 
-    *pos = my_fpos.__pos;
+    *pos = HYBRIS_FPOS_GET(my_fpos);
 
     return ret;
 }
@@ -1700,8 +1724,7 @@ static int _hybris_hook_fsetpos(FILE *fp, const bionic_fpos_t *pos)
     TRACE_HOOK("fp %p pos %p", fp, pos);
 
     fpos_t my_fpos;
-    my_fpos.__pos = *pos;
-    memset(&my_fpos.__state, 0, sizeof(mbstate_t));
+    HYBRIS_FPOS_SET(my_fpos, *pos);
 
     return fsetpos(_get_actual_fp(fp), &my_fpos);
 }
@@ -1711,8 +1734,7 @@ static int _hybris_hook_fsetpos64(FILE *fp, const bionic_fpos64_t *pos)
     TRACE_HOOK("fp %p pos %p", fp, pos);
 
     fpos64_t my_fpos;
-    my_fpos.__pos = *pos;
-    memset(&my_fpos.__state, 0, sizeof(mbstate_t));
+    HYBRIS_FPOS_SET(my_fpos, *pos);
 
     return fsetpos64(_get_actual_fp(fp), &my_fpos);
 }
@@ -2409,7 +2431,7 @@ __THROW int _hybris_hook___sprintf_chk (char *__restrict __s, int __flag, size_t
     int ret = 0;
     va_list args;
     va_start(args,__format);
-    ret = __vsprintf_chk (__s, __flag, __slen, __format, args);
+    ret = HYBRIS_VSPRINTF_CHK(__s, __flag, __slen, __format, args);
     va_end(args);
 
     return ret;
@@ -2420,7 +2442,7 @@ __THROW int _hybris_hook___snprintf_chk (char *__restrict __s, size_t __n, int _
     int ret = 0;
     va_list args;
     va_start(args,__format);
-    ret = __vsnprintf_chk (__s, __n, __flag, __slen, __format, args);
+    ret = HYBRIS_VSNPRINTF_CHK(__s, __n, __flag, __slen, __format, args);
     va_end(args);
 
     return ret;
@@ -2544,7 +2566,13 @@ static char* _hybris_hook__gnu_strerror_r(int errnum, char *buf, size_t buf_len)
 {
     TRACE_HOOK("errnum %d buf '%s' buf len %zu", errnum, buf, buf_len);
 
+#ifdef __GLIBC__
     return strerror_r(errnum, buf, buf_len);
+#else
+    /* musl: strerror_r XSI (devolve int) */
+    strerror_r(errnum, buf, buf_len);
+    return buf;
+#endif
 }
 
 static int _hybris_hook_mprotect(void *addr, size_t len, int prot)
@@ -3250,9 +3278,15 @@ static struct _hook hooks_common[] = {
     HOOK_DIRECT_NO_DEBUG(timer_gettime),
     HOOK_DIRECT_NO_DEBUG(timer_delete),
     HOOK_DIRECT_NO_DEBUG(timer_getoverrun),
+#ifdef HYBRIS_TIME32
+    HOOK_TO(localtime, _hybris_hook_localtime32),
+    HOOK_TO(localtime_r, _hybris_hook_localtime_r32),
+    HOOK_TO(gmtime, _hybris_hook_gmtime32),
+#else
     HOOK_DIRECT_NO_DEBUG(localtime),
     HOOK_DIRECT_NO_DEBUG(localtime_r),
     HOOK_DIRECT_NO_DEBUG(gmtime),
+#endif
     HOOK_DIRECT_NO_DEBUG(abort),
     HOOK_DIRECT_NO_DEBUG(writev),
     /* unistd.h */

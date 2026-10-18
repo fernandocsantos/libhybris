@@ -1,3 +1,4 @@
+#include "musl-compat.h"
 /*
  * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
  * Copyright (c) 2013 Christophe Chapuis <chris.chapuis@gmail.com>

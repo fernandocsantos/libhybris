@@ -1,3 +1,4 @@
+#include "../musl-compat.h"
 /*
  * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
  *               2008 The Android Open Source Project

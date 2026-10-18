@@ -52,7 +52,22 @@ static const char *dl_errors[] = {
 #define likely(expr)   __builtin_expect (expr, 1)
 #define unlikely(expr) __builtin_expect (expr, 0)
 
+#ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
 static pthread_mutex_t dl_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+#else
+/* musl: sem inicializador estático para mutex recursivo */
+static pthread_mutex_t dl_lock;
+
+__attribute__((constructor)) static void dl_lock_init(void)
+{
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&dl_lock, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+#endif
 
 static void set_dlerror(int err)
 {
